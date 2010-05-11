@@ -36,10 +36,10 @@ class TestPubSub(BaseZMQTestCase):
         s1, s2 = self.create_bound_pair(zmq.PUB, zmq.SUB)
         s2.setsockopt(zmq.SUBSCRIBE,'')
         import time; time.sleep(0.1)
-        msg1 = 'message'
-        s1.send(msg1)
+        msg = 'message'
+        s1.send(msg)
         msg2 = s2.recv()
-        self.assertEquals(msg1, msg2)
+        self.assertEquals(msg, str(msg2))
 
     # This test is failing on Windows due a problem with errno not 
     # being thread safe. In socket_base.cpp:recv, if zmq.NOBLOCK is set
@@ -53,10 +53,12 @@ class TestPubSub(BaseZMQTestCase):
         s1, s2 = self.create_bound_pair(zmq.PUB, zmq.SUB)
         s2.setsockopt(zmq.SUBSCRIBE,'x')
         import time; time.sleep(0.1)
-        msg1 = 'message'
-        s1.send(msg1)
+        s1.send('message')
         self.assertRaisesErrno(zmq.EAGAIN, s2.recv, zmq.NOBLOCK)
-        msg1 = 'xmessage'
-        s1.send(msg1)
+        s1.send('xmessage')
         msg2 = s2.recv()
-        self.assertEquals(msg1, msg2)
+        self.assertEquals('xmessage', str(msg2))
+
+if __name__ == '__main__':
+    import unittest
+    unittest.main()

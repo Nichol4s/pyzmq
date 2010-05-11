@@ -23,11 +23,14 @@ import zmq
 
 def main():
     use_poll = '-p' in sys.argv
+    use_copy = '-c' in sys.argv
+    if use_copy:
+        sys.argv.remove('-c')
     if use_poll:
         sys.argv.remove('-p')
 
     if len (sys.argv) != 4:
-        print 'usage: local_lat [-p use-poll] <bind-to> <message-size> <roundtrip-count>'
+        print 'usage: local_lat [-c use-copy] [-p use-poll] <bind-to> <message-size> <roundtrip-count>'
         sys.exit (1)
 
     try:
@@ -58,7 +61,7 @@ def main():
         if use_poll:
             res = p.poll()
             assert(res[0][1] & zmq.POLLOUT)
-        s.send(msg, zmq.NOBLOCK if use_poll else 0)
+        s.send(msg, zmq.NOBLOCK if use_poll else 0, copy=use_copy)
 
 if __name__ == '__main__':
     main()

@@ -22,19 +22,26 @@
 #-----------------------------------------------------------------------------
 # Imports
 #-----------------------------------------------------------------------------
-
+import cython
 
 from stdlib cimport *
 from python_string cimport PyString_FromStringAndSize
 from python_string cimport PyString_AsStringAndSize
 from python_string cimport PyString_AsString, PyString_Size
+from python_bytes cimport PyBytes_AsStringAndSize
 
 cdef extern from "Python.h":
     ctypedef int Py_ssize_t
+    cdef void Py_INCREF( object o )
+    cdef void Py_DECREF( object o )
+    cdef void PyEval_InitThreads()
+
+PyEval_InitThreads()
 
 import cPickle as pickle
 import random
 import struct
+
 
 try:
     import json
@@ -246,6 +253,85 @@ class ZMQError(Exception):
 #-----------------------------------------------------------------------------
 # Code
 #-----------------------------------------------------------------------------
+
+cdef void decref(void *data, void  *obj) with gil:
+    Py_DECREF(<object>obj)
+
+cdef class Message:
+    """ A message object
+    """
+
+    cdef void *hint
+    cdef zmq_free_fn *callback 
+    cdef zmq_msg_t zmq_msg
+    cdef char *data
+    cdef object datao
+    cdef object user_callback
+    cdef Py_ssize_t data_len
+    cdef bool contains_data
+
+    def __cinit__(self, object data=None, object usercb=None):
+        cdef int rc
+        self.contains_data = False
+        self.user_callback = usercb
+
+        if data is None:
+            # Initialize empty object
+            Py_INCREF(self)   #XXX
+            rc = zmq_msg_init(&self.zmq_msg)
+            if rc != 0:
+                raise ZMQError(zmq_errno())
+        else:
+            rc = PyBytes_AsStringAndSize(data, &self.data, &self.data_len)
+            if rc == -1:
+                raise TypeError("Object does not provide ByteArray interface")
+
+            # Object spcefied set up pointer and callback
+            Py_INCREF(self)
+            self.hint = <void *>self
+            self.callback = <zmq_free_fn*>decref
+            self.data = <char*>data  # Keep the data alive
+            self.datao = data        # Keep the object alive
+
+            self.contains_data = True
+            rc = zmq_msg_init_data(&self.zmq_msg, self.data, self.data_len, self.callback, self.hint)
+
+            if rc != 0:
+                self.contains_data = False
+                raise ZMQError(zmq_errno())
+
+    def size(self):
+        return zmq_msg_size(&self.zmq_msg)
+
+    cdef init_zmq_msg(self, zmq_msg_t new_zmq_msg):
+        self.zmq_msg = new_zmq_msg
+
+    def copy(self, Message omsg):
+        cdef Message m
+        # return a copy of this message
+        m = Message()
+        Py_INCREF(m)
+        zmq_msg_copy(&m.zmq_msg, &omsg.zmq_msg)
+        return m
+
+    def __len__(self):
+        return <int>zmq_msg_size(&self.zmq_msg)
+
+    def __str__(self):
+        cdef void * ptr
+        datastr = <char *>zmq_msg_data(&self.zmq_msg)
+        dataln = <int>zmq_msg_size(&self.zmq_msg)
+        return PyString_FromStringAndSize(datastr, dataln)
+
+    def __dealloc__(self):
+        if self.user_callback:
+            self.user_callback()
+
+    def close(self):
+        rc = zmq_msg_close(&self.zmq_msg)
+        if rc != 0:
+            raise ZMQError(zmq_errno())
+
 
 cdef class Context:
     """Manage the lifecycle of a 0MQ context.
@@ -493,11 +579,23 @@ cdef class Socket:
 
         if not isinstance(addr, str):
             raise TypeError('expected str, got: %r' % addr)
-        rc = zmq_connect(self.handle, addr)
+        with nogil:
+            rc = zmq_connect(self.handle, addr)
         if rc != 0:
             raise ZMQError()
 
-    def send(self, msg, int flags=0):
+    def send(self, object o, int flags=0, bool copy=False):
+        """ Send a message object or string
+        """
+        if type(o) == Message:
+            self.send_msg(o)
+        elif copy:
+            self.send_copy(o, flags)
+        else:
+            msg = Message(o)
+            self.send_msg(msg, flags)
+
+    def send_copy(self, msg, int flags=0):
         """Send a message.
 
         This queues the message to be sent by the IO thread at a later time.
@@ -510,7 +608,7 @@ cdef class Socket:
         Returns
         -------
         result : bool
-            True if message was send, raises error otherwise.
+            True if message was send, False if message was not sent (EAGAIN).
         """
         cdef int rc, rc2
         cdef zmq_msg_t data
@@ -531,7 +629,7 @@ cdef class Socket:
         memcpy(zmq_msg_data(&data), msg_c, zmq_msg_size(&data))
 
         if rc != 0:
-            raise ZMQError()
+            raise ZMQError(zmq_strerror(zmq_errno()))
 
         with nogil:
             rc = zmq_send(self.handle, &data, flags)
@@ -540,11 +638,46 @@ cdef class Socket:
         # Shouldn't the error handling for zmq_msg_close come after that
         # of zmq_send?
         if rc2 != 0:
-            raise ZMQError()
+            raise ZMQError(zmq_strerror(zmq_errno()))
 
         if rc != 0:
-            raise ZMQError()
+            if zmq_errno() == EAGAIN:
+                return False
+            else:
+                raise ZMQError(zmq_strerror(zmq_errno()))
+        else:
+            return True
 
+
+    def send_msg(self, Message msg, int flags=0):
+        """Send a message object
+
+        This queues the message to be sent by the IO thread at a later time.
+
+        Parameters
+        ----------
+        flags : int
+            Any supported flag: NOBLOCK, SNDMORE.
+
+        Returns
+        -------
+        result : bool
+            True if message was send, raises error otherwise.
+        """
+        cdef int rc
+        cdef zmq_msg_t data = msg.zmq_msg
+
+        self._check_closed()
+
+        if not msg.contains_data:
+            raise ZMQError("Message does not contain any data")
+
+        with nogil:
+            rc = zmq_send(self.handle, &data, flags)
+
+        if rc != 0:
+            raise ZMQError(zmq_errno())
+        msg.contains_data = False
         return True
 
     def recv(self, int flags=0):
@@ -563,31 +696,21 @@ cdef class Socket:
             The returned message
         """
         cdef int rc
-        cdef zmq_msg_t data
+        cdef Message message 
+        cdef zmq_msg_t zmq_msg
+        message = Message()
 
         self._check_closed()
 
-        rc = zmq_msg_init(&data)
-        if rc != 0:
-            raise ZMQError()
 
+        zmq_msg_init(&zmq_msg)
         with nogil:
-            rc = zmq_recv(self.handle, &data, flags)
-
+            rc = zmq_recv(self.handle, &zmq_msg, flags)
         if rc != 0:
-            raise ZMQError()
-
-        try:
-            msg = PyString_FromStringAndSize(
-                <char *>zmq_msg_data(&data), 
-                zmq_msg_size(&data)
-            )
-        finally:
-            rc = zmq_msg_close(&data)
-
-        if rc != 0:
-            raise ZMQError()
-        return msg
+            raise ZMQError(zmq_errno())
+        message.init_zmq_msg(zmq_msg)
+        message.contains_data = True
+        return message
 
     def send_multipart(self, msg_parts, int flags=0):
         """Send a sequence of messages as a multipart message.
@@ -924,6 +1047,7 @@ __all__ = [
     '_poll',
     'select',
     'Poller',
+    'Message',
     'split_ident',
     'join_ident',
     'EAGAIN',    # ERRORNO

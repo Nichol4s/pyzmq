@@ -22,7 +22,6 @@
 #-----------------------------------------------------------------------------
 
 import zmq
-
 from zmq.tests import BaseZMQTestCase
 
 #-----------------------------------------------------------------------------
@@ -32,28 +31,41 @@ from zmq.tests import BaseZMQTestCase
 class TestP2p(BaseZMQTestCase):
 
     def test_basic(self):
-        s1, s2 = self.create_bound_pair(zmq.PAIR, zmq.PAIR)
+        msg1 = zmq.Message("blabla")
+        msg2 = zmq.Message("blabla")
+        str1 = str(msg1)
+        str2 = str(msg2)
+        self.assertEquals(str1, str2)
 
-        msg1 = 'message1'
-        msg2 = self.ping_pong(s1, s2, msg1)
-        self.assertEquals(msg1, msg2)
+        s1, s2 = self.create_bound_pair(zmq.PAIR, zmq.PAIR)
+        import time
+        time.sleep(1)
+        msg = "message1"
+        #msg1 = str_to_msg(s)
+        #msg1 = zmq.Message(s)
+        time.sleep(1)
+        msg2 = self.ping_pong(s1, s2, msg)
+        self.assertEquals(msg, str(msg2))
 
     def test_multiple(self):
         s1, s2 = self.create_bound_pair(zmq.PAIR, zmq.PAIR)
+        for i in range(100):
+            #msg = zmq.Message(i*'X')
+            s1.send(i*'X')
 
-        for i in range(10):
-            msg = i*' '
-            s1.send(msg)
+        for i in range(100):
+            #msg = zmq.Message(i*'X')
+            s2.send(i*'X')
 
-        for i in range(10):
-            msg = i*' '
-            s2.send(msg)
-
-        for i in range(10):
+        for i in range(100):
             msg = s1.recv()
-            self.assertEquals(msg, i*' ')
+            self.assertEquals(str(msg), i*'X')
 
-        for i in range(10):
+        for i in range(100):
             msg = s2.recv()
-            self.assertEquals(msg, i*' ')
+            self.assertEquals(str(msg), i*'X')
 
+
+if __name__ == '__main__':
+    import unittest
+    unittest.main()
