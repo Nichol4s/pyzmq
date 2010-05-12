@@ -23,11 +23,14 @@ import time
 
 def main ():
     use_poll = '-p' in sys.argv
+    use_copy = '-c' in sys.argv
     if use_poll:
         sys.argv.remove('-p')
+    if use_copy:
+        sys.argv.remove('-c')
 
     if len (sys.argv) != 4:
-        print 'usage: remote_thr [-p use-poll] <connect-to> <message-size> <message-count>'
+        print 'usage: remote_thr [-c use-copy] [-p use-poll] <connect-to> <message-size> <message-count>'
         sys.exit (1)
 
     try:
@@ -57,7 +60,7 @@ def main ():
         if use_poll:
             res = p.poll()
             assert(res[0][1] & zmq.POLLOUT)
-        s.send (msg, zmq.NOBLOCK if use_poll else 0)
+        s.send (msg, zmq.NOBLOCK if use_poll else 0, copy=use_copy)
 
     time.sleep (1)
 

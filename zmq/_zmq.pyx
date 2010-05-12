@@ -277,8 +277,9 @@ cdef class Message:
 
         if data is None:
             # Initialize empty object
-            Py_INCREF(self)   #XXX
-            rc = zmq_msg_init(&self.zmq_msg)
+            #Py_INCREF(self)   #XXX
+            with nogil:
+                rc = zmq_msg_init(&self.zmq_msg)
             if rc != 0:
                 raise ZMQError(zmq_errno())
         else:
@@ -294,7 +295,8 @@ cdef class Message:
             self.datao = data        # Keep the object alive
 
             self.contains_data = True
-            rc = zmq_msg_init_data(&self.zmq_msg, self.data, self.data_len, self.callback, self.hint)
+            with nogil:
+                rc = zmq_msg_init_data(&self.zmq_msg, self.data, self.data_len, self.callback, self.hint)
 
             if rc != 0:
                 self.contains_data = False
@@ -629,7 +631,7 @@ cdef class Socket:
         memcpy(zmq_msg_data(&data), msg_c, zmq_msg_size(&data))
 
         if rc != 0:
-            raise ZMQError(zmq_strerror(zmq_errno()))
+            raise ZMQError()
 
         with nogil:
             rc = zmq_send(self.handle, &data, flags)
@@ -638,15 +640,12 @@ cdef class Socket:
         # Shouldn't the error handling for zmq_msg_close come after that
         # of zmq_send?
         if rc2 != 0:
-            raise ZMQError(zmq_strerror(zmq_errno()))
+            raise ZMQError()
 
         if rc != 0:
-            if zmq_errno() == EAGAIN:
-                return False
-            else:
-                raise ZMQError(zmq_strerror(zmq_errno()))
-        else:
-            return True
+            raise ZMQError()
+
+        return True
 
 
     def send_msg(self, Message msg, int flags=0):
@@ -696,9 +695,9 @@ cdef class Socket:
             The returned message
         """
         cdef int rc
-        cdef Message message 
+        #cdef Message message 
         cdef zmq_msg_t zmq_msg
-        message = Message()
+        #message = Message()
 
         self._check_closed()
 
@@ -706,11 +705,14 @@ cdef class Socket:
         zmq_msg_init(&zmq_msg)
         with nogil:
             rc = zmq_recv(self.handle, &zmq_msg, flags)
+
+        #message.zmq_msg = zmq_msg
+
         if rc != 0:
             raise ZMQError(zmq_errno())
-        message.init_zmq_msg(zmq_msg)
-        message.contains_data = True
-        return message
+        #print "GOT", rc, len(message)
+        #message.contains_data = True
+        return <char *>zmq_msg_data(&zmq_msg) 
 
     def send_multipart(self, msg_parts, int flags=0):
         """Send a sequence of messages as a multipart message.
