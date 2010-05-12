@@ -695,24 +695,22 @@ cdef class Socket:
             The returned message
         """
         cdef int rc
-        #cdef Message message 
+        cdef Message message
         cdef zmq_msg_t zmq_msg
-        #message = Message()
+        message = Message()
 
         self._check_closed()
 
 
-        zmq_msg_init(&zmq_msg)
         with nogil:
-            rc = zmq_recv(self.handle, &zmq_msg, flags)
-
+            rc = zmq_recv(self.handle, &message.zmq_msg, flags)
         #message.zmq_msg = zmq_msg
 
         if rc != 0:
             raise ZMQError(zmq_errno())
         #print "GOT", rc, len(message)
-        #message.contains_data = True
-        return <char *>zmq_msg_data(&zmq_msg) 
+        message.contains_data = True
+        return message
 
     def send_multipart(self, msg_parts, int flags=0):
         """Send a sequence of messages as a multipart message.
