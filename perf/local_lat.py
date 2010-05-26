@@ -55,13 +55,20 @@ def main():
         if use_poll:
             res = p.poll()
             assert(res[0][1] & zmq.POLLIN)
-        msg = s.recv(zmq.NOBLOCK if use_poll else 0)
+        m = s.recv(zmq.NOBLOCK if use_poll else 0)
+        if use_copy:
+            msg = str(m)
+        else:
+            msg = m
         assert len (msg) == message_size
 
         if use_poll:
             res = p.poll()
             assert(res[0][1] & zmq.POLLOUT)
         s.send(msg, zmq.NOBLOCK if use_poll else 0, copy=use_copy)
+        m.close()
+
+    time.sleep(1)
 
 if __name__ == '__main__':
     main()
