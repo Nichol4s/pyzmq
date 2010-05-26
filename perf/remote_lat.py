@@ -45,12 +45,17 @@ def main ():
     s = zmq.Socket (ctx, zmq.REQ)
     print connect_to
     s.connect (connect_to)
+    print "connecting"
+    time.sleep(1)
+    print "connected", use_copy
 
     if use_poll:
         p = zmq.Poller()
         p.register(s)
 
     msg = ' ' * message_size
+    if not use_copy:
+        msg = zmq.Message(msg)
 
     start = time.clock ()
 
@@ -67,8 +72,6 @@ def main ():
         assert len (msg) == message_size
 
     end = time.clock ()
-
-    time.sleep(1)
 
     elapsed = (end - start) * 1000000
     latency = elapsed / roundtrip_count / 2

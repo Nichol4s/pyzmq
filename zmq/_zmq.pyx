@@ -274,7 +274,6 @@ cdef class Message:
         cdef int rc
         self.contains_data = False
         self.user_callback = usercb
-
         if data is None:
             # Initialize empty object
             #Py_INCREF(self)   #XXX
@@ -291,7 +290,7 @@ cdef class Message:
             Py_INCREF(self)
             self.hint = <void *>self
             self.callback = <zmq_free_fn*>decref
-            self.data = <char*>data  # Keep the data alive
+            #self.data = <char*>data  # Keep the data alive
             self.datao = data        # Keep the object alive
 
             self.contains_data = True
@@ -704,11 +703,9 @@ cdef class Socket:
 
         with nogil:
             rc = zmq_recv(self.handle, &message.zmq_msg, flags)
-        #message.zmq_msg = zmq_msg
 
         if rc != 0:
             raise ZMQError(zmq_errno())
-        #print "GOT", rc, len(message)
         message.contains_data = True
         return message
 
